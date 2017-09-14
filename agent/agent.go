@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gobwas/glob"
 	"github.com/intelsdi-x/snap-plugin-lib-go/v1/plugin"
 	logging "github.com/op/go-logging"
 )
@@ -78,15 +79,13 @@ func (p *SnapProcessor) Process(mts []plugin.Metric, cfg plugin.Config) ([]plugi
 
 	log := p.Log.Logger
 	log.Infof("Process received metric size: %d", len(mts))
-
 	namespacesConfig, err := cfg.GetString("namespaces")
 	if err != nil {
 		return mts, errors.New("Unable to read namespaces config: " + err.Error())
 	}
-	processNamespaces := strings.Split(namespacesConfig, ",")
-	processNamespaces = append(processNamespaces, "")
+	processNamespaces := strings.Split(strings.Replace(namespacesConfig, " ", "", -1), ",")
+	// processNamespaces = append(processNamespaces, "")
 	log.Infof("Process namespaces: %+v", processNamespaces)
-
 	filterMetricKeywordsConfig, err := cfg.GetString("filterMetricKeywords")
 	if err != nil {
 		return mts, errors.New("Unable to read filterMetricKeywords config: " + err.Error())
@@ -97,6 +96,7 @@ func (p *SnapProcessor) Process(mts []plugin.Metric, cfg plugin.Config) ([]plugi
 	metrics := []plugin.Metric{}
 	for _, mt := range mts {
 		podNamespace, _ := mt.Tags["io.kubernetes.pod.namespace"]
+		// TODO: pass metrics with defined filterMetricKeywords
 		if inArray(podNamespace, processNamespaces) {
 			averageData := p.caluAverageData(mt, filterMetricKeywords, log)
 			if averageData != -1 {
@@ -114,7 +114,6 @@ func (p *SnapProcessor) Process(mts []plugin.Metric, cfg plugin.Config) ([]plugi
 
 /*
 	GetConfigPolicy() returns the configPolicy for your plugin.
-
 	A config policy is how users can provide configuration info to
 	plugin. Here you define what sorts of config info your plugin
 	needs and/or requires.
@@ -143,15 +142,16 @@ func (p *SnapProcessor) caluAverageData(
 	}
 
 	// filter do not need counter metric
-	caluMetric := namespaces[len(namespaces)-1]
+	// caluMetric := namespaces[len(namespaces)-1]
+	caluMetric := strings.Join(namespaces, "/")
 	filterCache := false
 	for _, metricKeyword := range filterMetricKeywords {
-		if strings.Contains(caluMetric, metricKeyword) {
+		g := glob.MustCompile(metricKeyword)
+		if g.Match(caluMetric) {
 			filterCache = true
 			break
 		}
 	}
-
 	if !filterCache {
 		p.Cache[mapKey] = PreviousData{
 			Data:   convertInterface(mt.Data),
@@ -159,7 +159,6 @@ func (p *SnapProcessor) caluAverageData(
 		}
 		log.Infof("Cache this time metric vaule: %+v", p.Cache[mapKey])
 	}
-
 	return averageData
 }
 
