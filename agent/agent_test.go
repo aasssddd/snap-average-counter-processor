@@ -30,10 +30,34 @@ func TestProcessor(t *testing.T) {
 		Convey("Test Process", func() {
 			p := NewProcessor()
 			cfg := plugin.Config{
-				"namespaces":           "default, hyperpilot",
-				"filterMetricKeywords": "perc*, intel/docker/spec/size_rw",
+				"namespaces":      "default, hyperpilot",
+				"exclude_metrics": "*percentage, *perc, intel/docker/spec/*",
 			}
+			// in, out, out, in, out, out, out
 			mts := []plugin.Metric{
+				plugin.Metric{
+					Namespace: plugin.NewNamespace("intel", "test", "a", "b"),
+					Config:    map[string]interface{}{"pw": "123aB"},
+					Data:      789,
+					Unit:      "int",
+					Timestamp: time.Now(),
+				},
+				plugin.Metric{
+					Namespace: plugin.NewNamespace("intel", "docker", "stats", "cgroups", "cpu_stats", "test_percentage"),
+					Config:    map[string]interface{}{"pw": "123aB"},
+					Data:      123,
+					Tags:      map[string]string{"io.kubernetes.pod.namespace": "default"},
+					Unit:      "int",
+					Timestamp: time.Now(),
+				},
+				plugin.Metric{
+					Namespace: plugin.NewNamespace("intel", "docker", "stats", "cgroups", "cpu_stats", "percentage"),
+					Config:    map[string]interface{}{"pw": "123aB"},
+					Data:      123,
+					Tags:      map[string]string{"io.kubernetes.pod.namespace": "default"},
+					Unit:      "int",
+					Timestamp: time.Now(),
+				},
 				plugin.Metric{
 					Namespace: plugin.NewNamespace("intel", "docker", "stats", "cgroups", "cpu_stats", "cpu_shares"),
 					Config:    map[string]interface{}{"pw": "123aB"},
@@ -68,8 +92,8 @@ func TestProcessor(t *testing.T) {
 				},
 			}
 			result, err := p.Process(mts, cfg)
-			Convey("Should only process 2 data", func() {
-				So(len(result), ShouldEqual, 3)
+			Convey("Should only process 1 data", func() {
+				So(len(result), ShouldEqual, 2)
 			})
 			Convey("No error returned", func() {
 				So(err, ShouldBeNil)

@@ -55,7 +55,7 @@ func NewLogger(filesPath string, name string) (*FileLog, error) {
 
 	fileLog := logging.NewLogBackend(logFile, "["+name+"]", 0)
 	fileLogLevel := logging.AddModuleLevel(fileLog)
-	fileLogLevel.SetLevel(logging.INFO, "")
+	fileLogLevel.SetLevel(logging.ERROR, "")
 	fileLogBackend := logging.NewBackendFormatter(fileLog, logFormatter)
 
 	log.SetBackend(logging.SetBackend(fileLogBackend))
@@ -86,29 +86,26 @@ func (p *SnapProcessor) Process(mts []plugin.Metric, cfg plugin.Config) ([]plugi
 	processNamespaces := strings.Split(strings.Replace(namespacesConfig, " ", "", -1), ",")
 	// processNamespaces = append(processNamespaces, "")
 	log.Infof("Process namespaces: %+v", processNamespaces)
-	filterMetricKeywordsConfig, err := cfg.GetString("filterMetricKeywords")
+	excludeMetricsConfig, err := cfg.GetString("exclude_metrics")
 	if err != nil {
 		return mts, errors.New("Unable to read filterMetricKeywords config: " + err.Error())
 	}
-	filterMetricKeywords := strings.Split(filterMetricKeywordsConfig, ",")
-	log.Infof("Process filterMetricKeywords: %+v", filterMetricKeywords)
+	excludeKeywordsList := strings.Split(strings.Replace(excludeMetricsConfig, " ", "", -1), ",")
+	log.Infof("Process filterMetricKeywords: %+v", excludeKeywordsList)
 
 	metrics := []plugin.Metric{}
 	for _, mt := range mts {
 		podNamespace, _ := mt.Tags["io.kubernetes.pod.namespace"]
 		// TODO: pass metrics with defined filterMetricKeywords
-		if inArray(podNamespace, processNamespaces) {
-			averageData := p.caluAverageData(mt, filterMetricKeywords, log)
-			if averageData != -1 {
-				mt.Data = averageData
-				mt.Tags["processed"] = "true"
-			}
+		if (podNamespace == "" || inArray(podNamespace, processNamespaces)) &&
+			!isKeywordMatch(strings.Join(mt.Namespace.Strings(), "/"), excludeKeywordsList) {
+			mt.Data = p.caluAverageData(mt, log)
 			metrics = append(metrics, mt)
 		}
 	}
 
 	log.Infof("Process filter metric size %d: ", len(metrics))
-	log.Infof("Process filter metric %+v: ", metrics)
+	// log.Infof("Process filter metric %+v: ", metrics)
 	return metrics, nil
 }
 
@@ -125,7 +122,6 @@ func (p *SnapProcessor) GetConfigPolicy() (plugin.ConfigPolicy, error) {
 
 func (p *SnapProcessor) caluAverageData(
 	mt plugin.Metric,
-	filterMetricKeywords []string,
 	log *logging.Logger) float64 {
 	namespaces := mt.Namespace.Strings()
 	mapKey := strings.Join(namespaces, "/")
@@ -141,25 +137,22 @@ func (p *SnapProcessor) caluAverageData(
 		}
 	}
 
-	// filter do not need counter metric
-	// caluMetric := namespaces[len(namespaces)-1]
-	caluMetric := strings.Join(namespaces, "/")
-	filterCache := false
-	for _, metricKeyword := range filterMetricKeywords {
-		g := glob.MustCompile(metricKeyword)
-		if g.Match(caluMetric) {
-			filterCache = true
-			break
-		}
+	p.Cache[mapKey] = PreviousData{
+		Data:   convertInterface(mt.Data),
+		Create: mt.Timestamp,
 	}
-	if !filterCache {
-		p.Cache[mapKey] = PreviousData{
-			Data:   convertInterface(mt.Data),
-			Create: mt.Timestamp,
-		}
-		log.Infof("Cache this time metric vaule: %+v", p.Cache[mapKey])
-	}
+	log.Infof("Cache this time metric vaule: %+v", p.Cache[mapKey])
 	return averageData
+}
+
+func isKeywordMatch(keyword string, patterns []string) bool {
+	isMatched := false
+	for _, pattern := range patterns {
+		g := glob.MustCompile(pattern)
+		isMatched = isMatched || g.Match(keyword)
+	}
+	return isMatched
+
 }
 
 func convertInterface(data interface{}) float64 {
